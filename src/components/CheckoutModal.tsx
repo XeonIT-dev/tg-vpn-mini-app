@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Sparkles, CreditCard, CheckCircle2, Loader2, AlertCircle } from "lucide-react";
+import { X, Sparkles, CreditCard, CheckCircle2, Loader2, AlertCircle, ExternalLink, RefreshCw } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 import { useTelegram } from "@/context/TelegramContext";
 import { formatRub, formatStars } from "@/lib/utils";
@@ -22,9 +22,14 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
   const [username, setUsername] = useState(user?.username || "");
   const [email, setEmail] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"telegram_stars" | "external_gateway">("telegram_stars");
+  const [paymentMethod, setPaymentMethod] = useState<"telegram_stars" | "external_gateway">("external_gateway");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // External payment pending state
+  const [pendingOrderId, setPendingOrderId] = useState<string | null>(null);
+  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  const [checkingPayment, setCheckingPayment] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,7 +71,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
       // 2. Handle Payment Method
       if (paymentMethod === "telegram_stars") {
-        // Request invoice link
         const invRes = await fetch("/api/invoice", {
           method: "POST",
           headers: {
@@ -81,7 +85,6 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           throw new Error(invData.error || "Не удалось создать счёт Telegram Stars");
         }
 
-        // Open Telegram native Stars invoice
         openInvoice(invData.invoice_link, (status) => {
           if (status === "paid") {
             haptic.notification("success");
@@ -94,10 +97,31 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           }
         });
       } else {
-        // External Gateway / SBP / Crypto
-        haptic.notification("success");
-        clearCart();
-        onSuccess();
+        // External Gateway: YooKassa (Карта / СБП)
+        const payRes = await fetch("/api/payment/create", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-telegram-init-data": initData,
+          },
+          body: JSON.stringify({ order_id: orderData.id }),
+        });
+
+        const payData = await payRes.json();
+        if (!payRes.ok) {
+          throw new Error(payData.error || "Не удалось создать платёжную ссылку");
+        }
+
+        const link = payData.confirmation_url;
+        setPaymentUrl(link);
+        setPendingOrderId(orderData.id);
+
+        // Open YooKassa payment window
+        if (window.Telegram?.WebApp?.openLink) {
+          window.Telegram.WebApp.openLink(link);
+        } else {
+          window.open(link, "_blank");
+        }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Произошла непредвиденная ошибка";
@@ -105,6 +129,31 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
       haptic.notification("error");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCheckStatus = async () => {
+    if (!pendingOrderId) return;
+    setCheckingPayment(true);
+    haptic.selection();
+
+    try {
+      const res = await fetch(`/api/payment/check?order_id=${pendingOrderId}`, {
+        headers: { "x-telegram-init-data": initData },
+      });
+      const data = await res.json();
+
+      if (data.is_paid) {
+        haptic.notification("success");
+        clearCart();
+        onSuccess();
+      } else {
+        setError("Оплата пока не поступила. Если вы уже оплатили, подождите 10-20 секунд и проверьте снова.");
+      }
+    } catch {
+      setError("Не удалось проверить статус платежа.");
+    } finally {
+      setCheckingPayment(false);
     }
   };
 
@@ -149,124 +198,163 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-            {/* Username Input */}
-            <div>
-              <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
-                Telegram Username
-              </label>
-              <div className="relative">
-                <span className="absolute left-3 top-2.5 text-zinc-500 text-sm">@</span>
-                <input
-                  type="text"
-                  required
-                  placeholder="username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full pl-8 pr-3 py-2.5 rounded-xl bg-zinc-950 border border-white/10 text-sm text-white focus:outline-none focus:border-indigo-500"
-                />
+          {pendingOrderId ? (
+            /* Pending Payment State */
+            <div className="mt-5 space-y-4">
+              <div className="p-4 rounded-2xl bg-zinc-950 border border-indigo-500/30 text-center space-y-2">
+                <div className="w-12 h-12 mx-auto rounded-xl bg-indigo-600/20 text-indigo-400 flex items-center justify-center">
+                  <CreditCard className="w-6 h-6 animate-pulse" />
+                </div>
+                <h4 className="text-sm font-bold text-white">Ожидаем оплату заказа</h4>
+                <p className="text-xs text-zinc-400">
+                  Счёт открыт в ЮKassa (Банковская карта, СБП, T-Pay, SberPay).
+                </p>
               </div>
-              <p className="text-[11px] text-zinc-500 mt-1">
-                Для автоматической привязки VPN ключа к вашему аккаунту
-              </p>
-            </div>
 
-            {/* Email Input (Optional) */}
-            <div>
-              <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
-                Email (опционально)
-              </label>
-              <input
-                type="email"
-                placeholder="client@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-xl bg-zinc-950 border border-white/10 text-sm text-white focus:outline-none focus:border-indigo-500"
-              />
-              <p className="text-[11px] text-zinc-500 mt-1">
-                Для дублирования инструкций и чека
-              </p>
-            </div>
-
-            {/* Payment Method Selector */}
-            <div>
-              <label className="block text-xs font-semibold text-zinc-300 mb-2">
-                Способ оплаты
-              </label>
-              <div className="grid grid-cols-2 gap-2.5">
-                {/* Telegram Stars */}
+              {paymentUrl && (
                 <button
                   type="button"
                   onClick={() => {
-                    haptic.selection();
-                    setPaymentMethod("telegram_stars");
+                    if (window.Telegram?.WebApp?.openLink) {
+                      window.Telegram.WebApp.openLink(paymentUrl);
+                    } else {
+                      window.open(paymentUrl, "_blank");
+                    }
                   }}
-                  className={`p-3 rounded-2xl border text-left transition-all ${
-                    paymentMethod === "telegram_stars"
-                      ? "bg-amber-500/10 border-amber-500/50 shadow-lg shadow-amber-500/10"
-                      : "bg-zinc-950/60 border-white/5 opacity-70 hover:opacity-100"
-                  }`}
+                  className="w-full py-3 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold text-xs flex items-center justify-center gap-2 border border-white/10 active:scale-95 transition-all"
                 >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <Sparkles className="w-5 h-5 text-amber-400" />
-                    {paymentMethod === "telegram_stars" && (
-                      <CheckCircle2 className="w-4 h-4 text-amber-400" />
-                    )}
-                  </div>
-                  <div className="text-xs font-bold text-white">Telegram Stars</div>
-                  <div className="text-[11px] font-semibold text-amber-400 mt-0.5">
-                    {formatStars(totalStars)}
-                  </div>
+                  <ExternalLink className="w-4 h-4" />
+                  <span>Открыть страницу оплаты повторно</span>
                 </button>
-
-                {/* External Gateway / Card / Crypto */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    haptic.selection();
-                    setPaymentMethod("external_gateway");
-                  }}
-                  className={`p-3 rounded-2xl border text-left transition-all ${
-                    paymentMethod === "external_gateway"
-                      ? "bg-indigo-500/10 border-indigo-500/50 shadow-lg shadow-indigo-500/10"
-                      : "bg-zinc-950/60 border-white/5 opacity-70 hover:opacity-100"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <CreditCard className="w-5 h-5 text-indigo-400" />
-                    {paymentMethod === "external_gateway" && (
-                      <CheckCircle2 className="w-4 h-4 text-indigo-400" />
-                    )}
-                  </div>
-                  <div className="text-xs font-bold text-white">Карта / СБП / USDT</div>
-                  <div className="text-[11px] font-semibold text-zinc-300 mt-0.5">
-                    {formatRub(totalPrice)}
-                  </div>
-                </button>
-              </div>
-            </div>
-
-            {/* Submit Button */}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full mt-6 py-3.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white font-bold text-sm shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2 active:scale-98 transition-all"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Обработка...</span>
-                </>
-              ) : (
-                <span>
-                  Оплатить{" "}
-                  {paymentMethod === "telegram_stars"
-                    ? formatStars(totalStars)
-                    : formatRub(totalPrice)}
-                </span>
               )}
-            </button>
-          </form>
+
+              <button
+                type="button"
+                disabled={checkingPayment}
+                onClick={handleCheckStatus}
+                className="w-full py-3.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-xl shadow-emerald-600/30 flex items-center justify-center gap-2 active:scale-98 transition-all"
+              >
+                <RefreshCw className={`w-4 h-4 ${checkingPayment ? "animate-spin" : ""}`} />
+                <span>Я оплатил — Проверить статус</span>
+              </button>
+            </div>
+          ) : (
+            /* Main Form */
+            <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+                  Telegram Username
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2.5 text-zinc-500 text-sm">@</span>
+                  <input
+                    type="text"
+                    required
+                    placeholder="username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="w-full pl-8 pr-3 py-2.5 rounded-xl bg-zinc-950 border border-white/10 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <p className="text-[11px] text-zinc-500 mt-1">
+                  Для автоматической привязки VPN ключа к вашему аккаунту
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
+                  Email (для чека самозанятого)
+                </label>
+                <input
+                  type="email"
+                  placeholder="client@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl bg-zinc-950 border border-white/10 text-sm text-white focus:outline-none focus:border-indigo-500"
+                />
+                <p className="text-[11px] text-zinc-500 mt-1">
+                  Чек об оплате будет отправлен на эту почту
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-300 mb-2">
+                  Способ оплаты
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {/* Card / SBP (YooKassa) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      haptic.selection();
+                      setPaymentMethod("external_gateway");
+                    }}
+                    className={`p-3 rounded-2xl border text-left transition-all ${
+                      paymentMethod === "external_gateway"
+                        ? "bg-indigo-500/10 border-indigo-500/50 shadow-lg shadow-indigo-500/10"
+                        : "bg-zinc-950/60 border-white/5 opacity-70 hover:opacity-100"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <CreditCard className="w-5 h-5 text-indigo-400" />
+                      {paymentMethod === "external_gateway" && (
+                        <CheckCircle2 className="w-4 h-4 text-indigo-400" />
+                      )}
+                    </div>
+                    <div className="text-xs font-bold text-white">Карта / СБП (Рубли)</div>
+                    <div className="text-[11px] font-semibold text-zinc-300 mt-0.5">
+                      {formatRub(totalPrice)}
+                    </div>
+                  </button>
+
+                  {/* Telegram Stars */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      haptic.selection();
+                      setPaymentMethod("telegram_stars");
+                    }}
+                    className={`p-3 rounded-2xl border text-left transition-all ${
+                      paymentMethod === "telegram_stars"
+                        ? "bg-amber-500/10 border-amber-500/50 shadow-lg shadow-amber-500/10"
+                        : "bg-zinc-950/60 border-white/5 opacity-70 hover:opacity-100"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <Sparkles className="w-5 h-5 text-amber-400" />
+                      {paymentMethod === "telegram_stars" && (
+                        <CheckCircle2 className="w-4 h-4 text-amber-400" />
+                      )}
+                    </div>
+                    <div className="text-xs font-bold text-white">Telegram Stars</div>
+                    <div className="text-[11px] font-semibold text-amber-400 mt-0.5">
+                      {formatStars(totalStars)}
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full mt-6 py-3.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white font-bold text-sm shadow-xl shadow-indigo-600/30 flex items-center justify-center gap-2 active:scale-98 transition-all"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Создание счёта...</span>
+                  </>
+                ) : (
+                  <span>
+                    Оплатить{" "}
+                    {paymentMethod === "telegram_stars"
+                      ? formatStars(totalStars)
+                      : formatRub(totalPrice)}
+                  </span>
+                )}
+              </button>
+            </form>
+          )}
         </motion.div>
       </div>
     </AnimatePresence>
