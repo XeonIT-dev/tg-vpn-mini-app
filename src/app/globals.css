@@ -3,33 +3,33 @@
 @tailwind utilities;
 
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
-  --card: #18181b;
-  --card-foreground: #fafafa;
-  --border: #27272a;
+  --background: #000000;
+  --foreground: #ededed;
+  --card: #0a0a0a;
+  --card-foreground: #ededed;
+  --border: rgba(255, 255, 255, 0.08);
 }
 
 .light {
-  --background: #f8fafc;
-  --foreground: #09090b;
-  --card: #ffffff;
-  --card-foreground: #09090b;
-  --border: #e2e8f0;
+  --background: #ffffff;
+  --foreground: #111111;
+  --card: #f9f9f9;
+  --card-foreground: #111111;
+  --border: rgba(0, 0, 0, 0.08);
 }
 
 body {
   color: var(--foreground);
   background-color: var(--background);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   user-select: none;
   -webkit-touch-callout: none;
   overflow-x: hidden;
+  letter-spacing: -0.01em;
 }
 
-/* Telegram iOS / Android safe area insets */
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 16px);
 }
@@ -38,21 +38,10 @@ body {
   padding-top: env(safe-area-inset-top, 0px);
 }
 
-/* Custom modern scrollbars */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  display: none;
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 9999px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+* {
+  scrollbar-width: none;
 }
