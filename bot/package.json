@@ -1,0 +1,22 @@
+{
+  "name": "tg-vpn-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Long polling Telegram bot for SHIELD VPN Mini App with Telegram Stars support",
+  "main": "bot.ts",
+  "scripts": {
+    "start": "tsx bot.ts",
+    "dev": "tsx watch bot.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "dotenv": "^16.4.5",
+    "grammy": "^1.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.11",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.3"
+  }
+}
